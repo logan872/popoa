@@ -13,52 +13,76 @@ function App() {
     const fileInputRef = useRef(null);
 
     const handleUpload = async (file) => {
-        // Сброс состояния
         setError(null);
         setImage(URL.createObjectURL(file));
         setLoading(true);
 
         try {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
+            const base64Image = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
 
-            reader.onloadend = async () => {
-                const base64Image = reader.result;
+            // Делаем последовательные запросы вместо параллельных для надежности
+            let dishName = 'Не распознано';
+            let calories = 'Не удалось оценить';
 
-                // Параллельные запросы для ускорения
-                const [dishNameResponse, caloriesResponse] = await Promise.all([
-                    axios.post('/api/vqa', {
-                        image: base64Image,
-                        question: 'What is the name of this dish? Describe it briefly.',
-                    }),
-                    axios.post('/api/vqa', {
-                        image: base64Image,
-                        question: 'What is the approximate calorie content per 100g of this dish in kcal? Give only number.',
-                    })
-                ]);
+            try {
+                const dishNameResponse = await axios.post('/api/vqa', {
+                    image: base64Image,
+                    question: 'What food is in this image? Name the dish.',
+                }, {
+                    timeout: 30000
+                });
+                dishName = dishNameResponse.data.answer?.toLowerCase().trim() || 'Не распознано';
+            } catch (err) {
+                console.error('Dish name error:', err);
+                dishName = 'Ошибка распознавания названия';
+            }
 
-                const dishName = dishNameResponse.data.answer?.toLowerCase().trim() || 'Не распознано';
+            try {
+                const caloriesResponse = await axios.post('/api/vqa', {
+                    image: base64Image,
+                    question: 'Estimate calories per 100g for this food. Answer with number only.',
+                }, {
+                    timeout: 30000
+                });
+
                 const caloriesRaw = caloriesResponse.data.answer || '';
                 const caloriesMatch = caloriesRaw.match(/\d+/);
-                const calories = caloriesMatch ? `${caloriesMatch[0]} ккал/100г` : 'Не удалось оценить';
+                calories = caloriesMatch ? `${caloriesMatch[0]} ккал/100г` : 'Не удалось оценить';
+            } catch (err) {
+                console.error('Calories error:', err);
+                // Продолжаем с уже полученным названием блюда
+            }
 
-                const newResult = {
-                    name: dishName,
-                    calories,
-                    timestamp: new Date().toLocaleString(),
-                    image: URL.createObjectURL(file)
-                };
-
-                setResult(newResult);
-
-                // Добавляем в историю
-                setHistory(prev => [newResult, ...prev.slice(0, 4)]); // Храним последние 5 результатов
+            const newResult = {
+                name: dishName,
+                calories,
+                timestamp: new Date().toLocaleString(),
+                image: URL.createObjectURL(file)
             };
+
+            setResult(newResult);
+            setHistory(prev => [newResult, ...prev.slice(0, 4)]);
+
         } catch (error) {
-            console.error('Ошибка API:', error);
-            setError('Произошла ошибка при анализе изображения. Попробуйте еще раз.');
+            console.error('Ошибка загрузки:', error);
+            let errorMessage = 'Произошла ошибка при анализе изображения';
+
+            if (error.code === 'ERR_NETWORK') {
+                errorMessage = 'Проблемы с соединением. Проверьте интернет.';
+            } else if (error.response?.status === 503) {
+                errorMessage = 'Модель загружается, попробуйте через 10-20 секунд';
+            } else if (error.response?.status === 405) {
+                errorMessage = 'Ошибка сервера: метод не разрешен';
+            }
+
+            setError(errorMessage);
             setResult({
-                name: 'Ошибка распознавания',
+                name: 'Ошибка',
                 calories: '',
                 timestamp: new Date().toLocaleString()
             });
@@ -85,6 +109,7 @@ function App() {
     const loadFromHistory = (historyItem) => {
         setImage(historyItem.image);
         setResult(historyItem);
+        setError(null);
     };
 
     return (
@@ -92,20 +117,18 @@ function App() {
             <div className="row">
                 <div className="col-md-8">
                     <h1 className="mb-4">🍽️ Распознаватель блюд</h1>
-                    <p className="text-muted mb-4">
-                        Загрузите изображение блюда для определения его названия и примерной калорийности
-                    </p>
 
                     <ImageUploader
                         onUpload={handleUpload}
                         onClear={handleClear}
                         ref={fileInputRef}
+                        disabled={loading}
                     />
 
                     {error && (
-                        <div className="alert alert-danger mt-3 d-flex justify-content-between align-items-center">
+                        <div className="alert alert-warning mt-3 d-flex justify-content-between align-items-center">
                             <span>{error}</span>
-                            <button className="btn btn-outline-danger btn-sm" onClick={handleRetry}>
+                            <button className="btn btn-outline-warning btn-sm" onClick={handleRetry}>
                                 Попробовать снова
                             </button>
                         </div>
@@ -119,6 +142,7 @@ function App() {
                                     src={image}
                                     alt="Загруженное блюдо"
                                     className="img-fluid rounded shadow-sm"
+                                    style={{ maxHeight: '300px' }}
                                 />
                                 {loading && (
                                     <div className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-light bg-opacity-75 rounded">
@@ -140,7 +164,7 @@ function App() {
                                 ></div>
                             </div>
                             <p className="text-center text-muted">
-                                Анализируем изображение с помощью VQA модели...
+                                Анализируем изображение... Это может занять до 30 секунд
                             </p>
                         </div>
                     )}
@@ -150,28 +174,29 @@ function App() {
                             <ResultDisplay result={result} />
                             <div className="mt-3">
                                 <button
-                                    className="btn btn-outline-secondary me-2"
+                                    className="btn btn-primary me-2"
                                     onClick={handleClear}
                                 >
-                                    Анализировать другое изображение
+                                    📸 Анализировать другое изображение
                                 </button>
-                                <button
-                                    className="btn btn-outline-info"
-                                    onClick={handleRetry}
-                                >
-                                    Попробовать снова
-                                </button>
+                                {error && (
+                                    <button
+                                        className="btn btn-outline-warning"
+                                        onClick={handleRetry}
+                                    >
+                                        🔄 Попробовать снова
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* Боковая панель с историей */}
                 {history.length > 0 && (
                     <div className="col-md-4">
                         <div className="card">
                             <div className="card-header">
-                                <h6 className="mb-0">📊 История анализов</h6>
+                                <h6 className="mb-0">📊 История</h6>
                             </div>
                             <div className="card-body">
                                 {history.map((item, index) => (
@@ -208,27 +233,6 @@ function App() {
                         </div>
                     </div>
                 )}
-            </div>
-
-            {/* Футер с информацией */}
-            <div className="mt-5 pt-4 border-top">
-                <div className="row">
-                    <div className="col-md-6">
-                        <h6>ℹ️ Как это работает?</h6>
-                        <p className="text-muted small">
-                            Система использует VQA (Visual Question Answering) модель для анализа изображений.
-                            Результаты по калорийности являются приблизительными.
-                        </p>
-                    </div>
-                    <div className="col-md-6">
-                        <h6>💡 Советы для лучших результатов:</h6>
-                        <ul className="text-muted small">
-                            <li>Используйте четкие, хорошо освещенные фотографии</li>
-                            <li>Снимайте блюдо сверху или под прямым углом</li>
-                            <li>Избегайте размытых или темных изображений</li>
-                        </ul>
-                    </div>
-                </div>
             </div>
         </div>
     );

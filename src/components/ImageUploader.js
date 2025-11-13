@@ -1,16 +1,14 @@
 import React from 'react';
 
-const ImageUploader = React.forwardRef(({ onUpload, onClear }, ref) => {
+const ImageUploader = React.forwardRef(({ onUpload, onClear, disabled }, ref) => {
     const handleFileChange = (event) => {
         const file = event.target.files[0];
-        if (file) {
-            // Проверка типа файла
+        if (file && !disabled) {
             if (!file.type.startsWith('image/')) {
                 alert('Пожалуйста, выберите файл изображения');
                 return;
             }
 
-            // Проверка размера файла (макс 5MB)
             if (file.size > 5 * 1024 * 1024) {
                 alert('Размер файла не должен превышать 5MB');
                 return;
@@ -30,17 +28,20 @@ const ImageUploader = React.forwardRef(({ onUpload, onClear }, ref) => {
                     accept="image/*"
                     onChange={handleFileChange}
                     className="d-none"
+                    disabled={disabled}
                 />
                 <div className="d-flex gap-2">
                     <button
                         className="btn btn-primary"
                         onClick={() => ref.current?.click()}
+                        disabled={disabled}
                     >
-                        📁 Выбрать файл
+                        {disabled ? '⏳ Загрузка...' : '📁 Выбрать файл'}
                     </button>
                     <button
                         className="btn btn-outline-secondary"
                         onClick={onClear}
+                        disabled={disabled}
                     >
                         🗑️ Очистить
                     </button>
@@ -52,5 +53,7 @@ const ImageUploader = React.forwardRef(({ onUpload, onClear }, ref) => {
         </div>
     );
 });
+
+ImageUploader.displayName = 'ImageUploader';
 
 export default ImageUploader;
