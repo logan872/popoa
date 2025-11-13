@@ -12,33 +12,32 @@ function App() {
     const [result, setResult] = useState(null);
     const [loading, setLoading] = useState(false);
 
-    const queryVQA = async (file, question) => {
-        const formData = new FormData();
-        formData.append('inputs', file);
-        formData.append('parameters', JSON.stringify({ question }));
-
-        const response = await axios.post(API_URL, formData, {
-            headers: {
-                Authorization: `Bearer ${HF_TOKEN}`,
-            },
-        });
-        return response.data[0]?.answer || 'Не распознано';
-    };
-
     const handleUpload = async (file) => {
         setImage(URL.createObjectURL(file));
         setLoading(true);
 
         try {
-            const dishNameRaw = await queryVQA(file, 'What is the name of this dish?');
-            const dishName = dishNameRaw.toLowerCase().trim();
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onloadend = async () => {
+                const base64Image = reader.result;
 
-            const caloriesRaw = await queryVQA(file, 'What is the approximate calorie content per 100g of this dish in kcal?');
-            // Парсим числовое значение (например, "200" из текста)
-            const caloriesMatch = caloriesRaw.match(/\d+/);
-            const calories = caloriesMatch ? `${caloriesMatch[0]} ккал/100г` : 'Не удалось оценить';
+                const dishNameResponse = await axios.post('/api/vqa', {
+                    image: base64Image,
+                    question: 'What is the name of this dish?',
+                });
+                const dishName = dishNameResponse.data.answer?.toLowerCase().trim() || 'Не распознано';
 
-            setResult({ name: dishName, calories });
+                const caloriesResponse = await axios.post('/api/vqa', {
+                    image: base64Image,
+                    question: 'What is the approximate calorie content per 100g of this dish in kcal?',
+                });
+                const caloriesRaw = caloriesResponse.data.answer || 'Не удалось оценить';
+                const caloriesMatch = caloriesRaw.match(/\d+/);
+                const calories = caloriesMatch ? `${caloriesMatch[0]} ккал/100г` : 'Не удалось оценить';  // Исправила опечатку здесь
+
+                setResult({ name: dishName, calories });
+            };
         } catch (error) {
             console.error('Ошибка API:', error);
             setResult({ name: 'Ошибка распознавания', calories: '' });
@@ -46,6 +45,7 @@ function App() {
             setLoading(false);
         }
     };
+
 
     return (
         <div className="container mt-5">
