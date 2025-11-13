@@ -4,9 +4,6 @@ import ResultDisplay from './components/ResultDisplay';
 import axios from 'axios';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
-const API_URL = 'https://api-inference.huggingface.co/models/Salesforce/blip-vqa-capfilt-large';
-const HF_TOKEN = process.env.REACT_APP_HF_TOKEN;
-
 function App() {
     const [image, setImage] = useState(null);
     const [result, setResult] = useState(null);
